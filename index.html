@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- منوی ساده برای تست سوییچ صفحات -->
+
     <nav id="top-nav">
         <button data-page="home">Home</button>
         <button data-page="notebook">Notebook</button>
@@ -15,14 +15,22 @@
         <button data-page="cv">CV</button>
     </nav>
 
-    <!-- کانواس سه‌بعدی -->
     <div id="scene-container">
         <canvas id="webgl-canvas"></canvas>
     </div>
 
-    <!-- اسکریپت‌ها -->
-    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
-    <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="main.js"></script>
+    <!-- Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <!-- Main JS -->
+    <script type="module" src="./main.js"></script>
+
 </body>
 </html>
