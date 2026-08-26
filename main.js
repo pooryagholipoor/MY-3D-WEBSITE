@@ -1,16 +1,17 @@
 let scene, camera, renderer;
 let currentPage = 'home';
 
+let stars = null;
+let blackHole = null;
+
 init();
 animate();
 
 function init() {
     const canvas = document.getElementById('webgl-canvas');
 
-    // صحنه
     scene = new THREE.Scene();
 
-    // دوربین
     camera = new THREE.PerspectiveCamera(
         60,
         window.innerWidth / window.innerHeight,
@@ -19,14 +20,11 @@ function init() {
     );
     camera.position.set(0, 0, 5);
 
-    // رندرر
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
 
-    // پس‌زمینهٔ صفحه home (فعلاً یک رنگ، بعداً عکس فضا)
     setHomeScene();
 
-    // لیسنر برای دکمه‌های منو
     const nav = document.getElementById('top-nav');
     nav.addEventListener('click', (e) => {
         if (e.target.tagName.toLowerCase() === 'button') {
@@ -46,13 +44,18 @@ function onWindowResize() {
 
 function animate() {
     requestAnimationFrame(animate);
+
+    if (stars) stars.rotation.y += 0.0005;
+    if (blackHole) blackHole.rotation.z += 0.002;
+
     renderer.render(scene, camera);
 }
 
-// تغییر صفحه
 function changePage(page) {
     currentPage = page;
-    // پاک کردن صحنه قبلی
+
+    scene.background = null; // مهم
+
     while (scene.children.length > 0) {
         scene.remove(scene.children[0]);
     }
@@ -66,27 +69,51 @@ function changePage(page) {
     }
 }
 
-// صفحه home
 function setHomeScene() {
-    // پس‌زمینه ساده، بعداً عکس فضا و سیاه‌چاله اضافه می‌کنیم
-    const geometry = new THREE.SphereGeometry(1, 32, 32);
-    const material = new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true });
-    const sphere = new THREE.Mesh(geometry, material);
-    scene.add(sphere);
+    const loader = new THREE.TextureLoader();
+    const bgTexture = loader.load('assets/images/space_bg.jpg');
+    scene.background = bgTexture;
+
+    stars = addStars();
+    blackHole = addBlackHole();
 }
 
-// صفحه notebook
-function setNotebookScene() {
-    const geometry = new THREE.BoxGeometry(1.5, 1, 0.1);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true });
-    const book = new THREE.Mesh(geometry, material);
-    scene.add(book);
+function addStars() {
+    const starGeometry = new THREE.BufferGeometry();
+    const starCount = 1500;
+
+    const positions = new Float32Array(starCount * 3);
+
+    for (let i = 0; i < starCount * 3; i++) {
+        positions[i] = (Math.random() - 0.5) * 600;
+    }
+
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const starMaterial = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 0.15,
+        transparent: true
+    });
+
+    const stars = new THREE.Points(starGeometry, starMaterial);
+    scene.add(stars);
+
+    return stars;
 }
 
-// صفحات دیگر فعلاً placeholder
-function setPlaceholderScene(pageName) {
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshBasicMaterial({ color: 0x3333ff, wireframe: true });
-    const cube = new THREE.Mesh(geometry, material);
-    scene.add(cube);
+function addBlackHole() {
+    const geometry = new THREE.RingGeometry(1.2, 2.5, 64);
+    const material = new THREE.MeshBasicMaterial({
+        color: 0x00ff88,
+        side: THREE.DoubleSide
+    });
+
+    const ring = new THREE.Mesh(geometry, material);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, -1, -2);
+
+    scene.add(ring);
+
+    return ring;
 }
