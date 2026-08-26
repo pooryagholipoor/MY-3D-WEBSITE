@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <title>Poorya 3D Portal Website</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- منوی ساده برای تست سوییچ صفحات -->
+    <nav id="top-nav">
+        <button data-page="home">Home</button>
+        <button data-page="notebook">Notebook</button>
+        <button data-page="about">About</button>
+        <button data-page="contact">Contact</button>
+        <button data-page="cv">CV</button>
+    </nav>
+
+    <!-- کانواس سه‌بعدی -->
+    <div id="scene-container">
+        <canvas id="webgl-canvas"></canvas>
+    </div>
+
+    <!-- اسکریپت‌ها -->
+    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
