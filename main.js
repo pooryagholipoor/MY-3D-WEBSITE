@@ -15,6 +15,11 @@ let portalDialMesh = null;
 
 let isMobile = false;
 
+let pulseMesh = null;
+let portalOpen = false;
+let portalTimeoutId = null;
+
+
 init();
 animate();
 
@@ -177,14 +182,161 @@ function addPortalGunParts(model) {
     updatePortalText("HOME");
 }
 
+function handlePortalShot() {
+    if (!portalGun || portalOpen) return;
+
+    // 1. ساخت پالس سبز
+    const geom = new THREE.CylinderGeometry(0.2, 0.2, 40, 16);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
+    pulseMesh = new THREE.Mesh(geom, mat);
+
+    pulseMesh.rotation.z = Math.PI / 2;
+    pulseMesh.position.copy(portalGun.position);
+    pulseMesh.position.y += 2;   // کمی بالاتر از بدنه
+    scene.add(pulseMesh);
+
+    // 2. انیمیشن کوتاه پالس
+    let t = 0;
+    const pulseDuration = 400; // میلی‌ثانیه
+    const startTime = performance.now();
+
+    function animatePulse(time) {
+        t = (time - startTime) / pulseDuration;
+        if (t >= 1) {
+            scene.remove(pulseMesh);
+            pulseMesh = null;
+            openPortalVideo();
+            return;
+        }
+
+        // حرکت به سمت وسط صفحه (محور z)
+        pulseMesh.position.z -= 0.8;
+        pulseMesh.material.opacity = 0.8 * (1 - t);
+
+        requestAnimationFrame(animatePulse);
+    }
+
+    requestAnimationFrame(animatePulse);
+}
+
+function openPortalVideo() {
+    const video = document.getElementById("portal-video");
+    if (!video) return;
+
+    portalOpen = true;
+    video.currentTime = 0;
+    video.play();
+
+    let scale = 0;
+    let opacity = 0;
+
+    function animateOpen() {
+        scale += 0.08;
+        opacity += 0.08;
+
+        if (scale >= 1) {
+            scale = 1;
+            opacity = 1;
+        } else {
+            requestAnimationFrame(animateOpen);
+        }
+
+        video.style.transform = `translate(-50%, -50%) scale(${scale})`;
+        video.style.opacity = `${opacity}`;
+    }
+
+    animateOpen();
+
+    // کلیک روی پرتال → رفتن به صفحه
+    video.onclick = () => {
+        moveCameraToPortalAndChangePage();
+        clearTimeout(portalTimeoutId);
+    };
+
+    // اگر ۱۵ ثانیه کلیک نشد → بسته شود
+    portalTimeoutId = setTimeout(() => {
+        closePortalVideo();
+    }, 15000);
+}
+
+function closePortalVideo() {
+    const video = document.getElementById("portal-video");
+    if (!video) return;
+
+    let scale = 1;
+    let opacity = 1;
+
+    function animateClose() {
+        scale -= 0.08;
+        opacity -= 0.08;
+
+        if (scale <= 0) {
+            scale = 0;
+            opacity = 0;
+            video.pause();
+            portalOpen = false;
+            video.style.transform = `translate(-50%, -50%) scale(0)`;
+            video.style.opacity = `0`;
+            return;
+        } else {
+            requestAnimationFrame(animateClose);
+        }
+
+        video.style.transform = `translate(-50%, -50%) scale(${scale})`;
+        video.style.opacity = `${opacity}`;
+    }
+
+    animateClose();
+}
+
+function moveCameraToPortalAndChangePage() {
+    const target = new THREE.Vector3(0, 0, 0); // وسط صحنه / پرتال
+    const startPos = camera.position.clone();
+    const endPos = new THREE.Vector3(0, 0, 20);
+
+    const duration = 800;
+    const startTime = performance.now();
+
+    function animateCam(time) {
+        const t = Math.min((time - startTime) / duration, 1);
+
+        camera.position.lerpVectors(startPos, endPos, t);
+        camera.lookAt(target);
+
+        if (t < 1) {
+            requestAnimationFrame(animateCam);
+        } else {
+            // بعد از رسیدن به پرتال → تغییر صفحه
+            changePage(pages[selectedPageIndex]);
+            closePortalVideo();
+        }
+    }
+
+    requestAnimationFrame(animateCam);
+}
+
+
 function setupDialDomInteraction() {
     const dialDom = document.getElementById("portal-dial-dom");
 
+    let lastTapTime = 0;
+
     dialDom.addEventListener("pointerdown", () => {
-        selectedPageIndex = (selectedPageIndex + 1) % pages.length;
-        updatePortalText(pages[selectedPageIndex]);
+        const now = Date.now();
+
+        // دابل‌کلیک / دابل‌تاپ
+        if (now - lastTapTime < 300) {
+            handlePortalShot();
+        } else {
+            // کلیک معمولی → تغییر متن
+            selectedPageIndex = (selectedPageIndex + 1) % pages.length;
+            updatePortalText(pages[selectedPageIndex]);
+        }
+
+        lastTapTime = now;
     });
 }
+
 
 function updatePortalText(text) {
     const div = document.getElementById("portal-text");
