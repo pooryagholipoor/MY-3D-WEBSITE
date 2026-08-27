@@ -7,12 +7,13 @@ const pages = ["home", "notebook", "about", "contact", "cv"];
 let selectedPageIndex = 0;
 
 let stars = null;
-let blackHole = null;
 
 // اجزای پورتال‌گان
 let portalGun = null;
-let portalDial = null;
 let portalScreen = null;
+let portalDialMesh = null;
+
+let isMobile = false;
 
 init();
 animate();
@@ -28,7 +29,8 @@ function init() {
         0.1,
         1000
     );
-    camera.position.set(-30, 20, 100);
+
+    updateCameraForDevice();
 
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -50,7 +52,20 @@ function init() {
         }
     });
 
-    window.addEventListener('resize', onWindowResize);
+    window.addEventListener('resize', () => {
+        updateCameraForDevice();
+        onWindowResize();
+    });
+}
+
+function updateCameraForDevice() {
+    isMobile = window.innerWidth < 768;
+
+    if (isMobile) {
+        camera.position.set(-15, 10, 60);
+    } else {
+        camera.position.set(-30, 20, 100);
+    }
 }
 
 function onWindowResize() {
@@ -63,7 +78,9 @@ function animate() {
     requestAnimationFrame(animate);
 
     if (stars) stars.rotation.y += 0.0005;
-    if (blackHole) blackHole.rotation.z += 0.002;
+
+    updatePortalTextPosition();
+    updateDialDomPosition();
 
     renderer.render(scene, camera);
 }
@@ -92,7 +109,6 @@ function setHomeScene() {
     scene.background = bgTexture;
 
     stars = addStars();
-    blackHole = addBlackHole();
 
     loadPortalGun();
 }
@@ -121,22 +137,6 @@ function addStars() {
     return stars;
 }
 
-function addBlackHole() {
-    const geometry = new THREE.RingGeometry(1.2, 2.5, 64);
-    const material = new THREE.MeshBasicMaterial({
-        color: 0x00ff88,
-        side: THREE.DoubleSide
-    });
-
-    const ring = new THREE.Mesh(geometry, material);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, -1, -2);
-
-    scene.add(ring);
-
-    return ring;
-}
-
 // ---------- پورتال‌گان مبتنی بر مدل GLB ----------
 
 function loadPortalGun() {
@@ -145,13 +145,10 @@ function loadPortalGun() {
     loader.load('assets/models/portal_gun_rick_and_morty.glb', (gltf) => {
         portalGun = gltf.scene;
 
-        // اندازه مناسب
-        portalGun.scale.set(0.45, 0.45, 0.45);
+        const scale = isMobile ? 0.25 : 0.45;
+        portalGun.scale.set(scale, scale, scale);
 
-        // قرار گرفتن در پایین صفحه
         portalGun.position.set(0, -1.2, 0);
-
-        // جهت رو به جلو مثل عکس
         portalGun.rotation.set(0.1, -1.5, 0);
 
         scene.add(portalGun);
@@ -162,90 +159,73 @@ function loadPortalGun() {
 
 function addPortalGunParts(model) {
 
-    // 1) انتخاب دقیق صفحهٔ قرمز روی بدنه
     model.traverse((child) => {
         if (!child.isMesh) return;
 
+        // صفحهٔ قرمز واقعی
         if (child.name === "Body15_Paint_-_Enamel_Glossy_(Red)_0") {
-            // صفحهٔ قرمز اصلی
             portalScreen = child;
-
-            // متریال را clone می‌کنیم تا فقط همین بخش تحت‌تأثیر متن باشد
-            portalScreen.material = portalScreen.material.clone();
         }
 
-        // اگر بخش‌های سبز پایه مزاحم‌اند، می‌توانیم مخفی‌شان کنیم:
-        if (
-            child.name === "Body8_Paint_-_Enamel_Glossy_(Green)_0" ||
-            child.name === "Body9_Paint_-_Enamel_Glossy_(Green)_0" ||
-            child.name === "Body10_Paint_-_Enamel_Glossy_(Green)_0" ||
-            child.name === "Body28_Paint_-_Enamel_Glossy_(Green)_(1)_0"
-        ) {
-            // اگر می‌خواهی پایه سبز حذف شود:
-            // child.visible = false;
+        // دکمهٔ سیاه واقعی مدل
+        if (child.name === "Body23_Steel_-_Satin_0") {
+            portalDialMesh = child;
         }
     });
 
-    // 2) دکمهٔ گرد سیاه روی بدنه (مخفی ولی قابل کلیک)
-    const dialGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.06, 32);
-    const dialMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-    const dial = new THREE.Mesh(dialGeo, dialMat);
-
-    dial.rotation.x = Math.PI / 2;
-    dial.position.set(-0.25, -0.12, 0.25); // با چشم می‌تونی ریز تنظیمش کنی
-    model.add(dial);
-    portalDial = dial;
-
-    setupDialInteraction();
-    updateScreenText("HOME");
+    setupDialDomInteraction();
+    updatePortalText("HOME");
 }
 
+function setupDialDomInteraction() {
+    const dialDom = document.getElementById("portal-dial-dom");
 
-function setupDialInteraction() {
-    window.addEventListener("click", (event) => {
-
-        // محاسبهٔ برخورد کلیک با دکمهٔ سیاه
-        const mouse = new THREE.Vector2(
-            (event.clientX / window.innerWidth) * 2 - 1,
-            -(event.clientY / window.innerHeight) * 2 + 1
-        );
-
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(mouse, camera);
-
-        const intersects = raycaster.intersectObject(portalDial);
-
-        if (intersects.length === 0) return;
-
+    dialDom.addEventListener("pointerdown", () => {
         selectedPageIndex = (selectedPageIndex + 1) % pages.length;
-
-        portalDial.rotation.z += Math.PI / 3;
-
-        updateScreenText(pages[selectedPageIndex]);
+        updatePortalText(pages[selectedPageIndex]);
     });
 }
 
-function updateScreenText(text) {
+function updatePortalText(text) {
+    const div = document.getElementById("portal-text");
+    div.innerText = text.toUpperCase();
+}
+
+function updatePortalTextPosition() {
     if (!portalScreen) return;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 128;
+    const vector = new THREE.Vector3();
+    portalScreen.getWorldPosition(vector);
 
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "red";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    vector.project(camera);
 
-    ctx.fillStyle = "black";
-    ctx.font = "bold 40px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText(text.toUpperCase(), canvas.width / 2, canvas.height / 2 + 15);
+    let x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+    let y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
 
-    const texture = new THREE.CanvasTexture(canvas);
-    portalScreen.material.map = texture;
-    portalScreen.material.needsUpdate = true;
+    // تنظیمات دقیق برای قرارگیری روی بخش قرمز
+    x -= -30;   // کمی چپ‌تر
+    y -= 45;   // کمی بالاتر
+
+    const div = document.getElementById("portal-text");
+    div.style.left = `${x}px`;
+    div.style.top = `${y}px`;
 }
 
+function updateDialDomPosition() {
+    if (!portalDialMesh) return;
+
+    const vector = new THREE.Vector3();
+    portalDialMesh.getWorldPosition(vector);
+
+    vector.project(camera);
+
+    let x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+    let y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
+
+    const dialDom = document.getElementById("portal-dial-dom");
+    dialDom.style.left = `${x + 30}px`;
+    dialDom.style.top = `${y - 10}px`;
+}
 
 // ---------- صفحات دیگر ----------
 
