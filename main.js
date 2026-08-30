@@ -19,7 +19,6 @@ let pulseMesh = null;
 let portalOpen = false;
 let portalTimeoutId = null;
 
-
 init();
 animate();
 
@@ -37,7 +36,7 @@ function init() {
 
     updateCameraForDevice();
 
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -182,44 +181,120 @@ function addPortalGunParts(model) {
     updatePortalText("HOME");
 }
 
+/* -----------------------
+   Long-press interaction
+   ----------------------- */
+function setupDialDomInteraction() {
+    const dialDom = document.getElementById("portal-dial-dom");
+
+    let pressTimer = null;
+
+    dialDom.addEventListener("pointerdown", (e) => {
+        // prevent text selection / default
+        e.preventDefault();
+
+        pressTimer = setTimeout(() => {
+            // long press -> fire portal
+            handlePortalShot();
+            pressTimer = null;
+        }, 420); // 420ms long-press threshold
+    });
+
+    dialDom.addEventListener("pointerup", (e) => {
+        e.preventDefault();
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+            // short tap -> change text
+            selectedPageIndex = (selectedPageIndex + 1) % pages.length;
+            updatePortalText(pages[selectedPageIndex]);
+        }
+    });
+
+    dialDom.addEventListener("pointerleave", () => {
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        }
+    });
+}
+
+/* -----------------------
+   Pulse: spinning green sphere
+   ----------------------- */
 function handlePortalShot() {
     if (!portalGun || portalOpen) return;
 
-    // 1. ساخت پالس سبز
-    const geom = new THREE.CylinderGeometry(0.2, 0.2, 40, 16);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
+    // create a glowing sphere (pulse)
+    const geom = new THREE.SphereGeometry(0.9, 32, 32);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x00ff66,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending
+    });
+
     pulseMesh = new THREE.Mesh(geom, mat);
 
-    pulseMesh.rotation.z = Math.PI / 2;
-    pulseMesh.position.copy(portalGun.position);
-    pulseMesh.position.y += 2;   // کمی بالاتر از بدنه
+    // start position: use dial mesh world position if available, otherwise portalGun
+    const startPos = new THREE.Vector3();
+    if (portalDialMesh) {
+        portalDialMesh.getWorldPosition(startPos);
+    } else {
+        portalGun.getWorldPosition(startPos);
+    }
+    // lift a bit so it looks like it's launched from the top
+    startPos.y += 0.6;
+    startPos.z -= 0.6;
+
+    pulseMesh.position.copy(startPos);
+    pulseMesh.scale.set(0.6, 0.6, 0.6);
     scene.add(pulseMesh);
 
-    // 2. انیمیشن کوتاه پالس
-    let t = 0;
-    const pulseDuration = 400; // میلی‌ثانیه
+    // end position: a point in front of camera (center of screen) but in world space
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const endPos = camera.position.clone().add(forward.multiplyScalar(10)); // 10 units in front of camera
+
+    const duration = 420;
     const startTime = performance.now();
 
     function animatePulse(time) {
-        t = (time - startTime) / pulseDuration;
-        if (t >= 1) {
+        const t = Math.min((time - startTime) / duration, 1);
+
+        // position lerp
+        pulseMesh.position.lerpVectors(startPos, endPos, easeOutCubic(t));
+
+        // spin
+        pulseMesh.rotation.x += 0.25;
+        pulseMesh.rotation.y += 0.35;
+
+        // scale up slightly and fade
+        const s = 0.6 + 0.8 * t;
+        pulseMesh.scale.set(s, s, s);
+        pulseMesh.material.opacity = 1 - t;
+
+        if (t < 1) {
+            requestAnimationFrame(animatePulse);
+        } else {
+            // remove pulse and open portal UI at a screen position slightly above endPos
             scene.remove(pulseMesh);
             pulseMesh = null;
-            openPortalVideo();
-            return;
+
+            // compute a screen position slightly above endPos so portal doesn't overlap gun
+            const portalAnchor = endPos.clone();
+            portalAnchor.y += 0.6;
+            openPortalVideoAtWorldPosition(portalAnchor);
         }
-
-        // حرکت به سمت وسط صفحه (محور z)
-        pulseMesh.position.z -= 0.8;
-        pulseMesh.material.opacity = 0.8 * (1 - t);
-
-        requestAnimationFrame(animatePulse);
     }
 
     requestAnimationFrame(animatePulse);
 }
 
-function openPortalVideo() {
+/* -----------------------
+   Open portal video at a world position (so it won't overlap the gun)
+   ----------------------- */
+function openPortalVideoAtWorldPosition(worldPos) {
     const video = document.getElementById("portal-video");
     if (!video) return;
 
@@ -227,117 +302,166 @@ function openPortalVideo() {
     video.currentTime = 0;
     video.play();
 
+    // compute screen coords from worldPos
+    const screen = worldToScreen(worldPos, camera);
+    // place video centered on that screen point
+    const vw = video.offsetWidth || 380;
+    const vh = video.offsetHeight || 380;
+
+    // set initial small scale and position
+    video.style.left = `${screen.x}px`;
+    video.style.top = `${screen.y}px`;
+    video.style.transform = `translate(-50%, -50%) scale(0)`;
+    video.style.opacity = `0`;
+    video.style.display = 'block';
+
+    // animate scale and opacity smoothly to a larger final size
     let scale = 0;
     let opacity = 0;
+    const targetScale = 1.25; // final scale multiplier (bigger)
+    const duration = 520;
+    const startTime = performance.now();
 
-    function animateOpen() {
-        scale += 0.08;
-        opacity += 0.08;
+    function animateOpen(time) {
+        const t = Math.min((time - startTime) / duration, 1);
+        const eased = easeOutCubic(t);
 
-        if (scale >= 1) {
-            scale = 1;
-            opacity = 1;
-        } else {
-            requestAnimationFrame(animateOpen);
-        }
+        scale = eased * targetScale;
+        opacity = eased;
 
         video.style.transform = `translate(-50%, -50%) scale(${scale})`;
         video.style.opacity = `${opacity}`;
+
+        if (t < 1) {
+            requestAnimationFrame(animateOpen);
+        } else {
+            // start timeout for auto-close
+            portalTimeoutId = setTimeout(() => {
+                closePortalVideo();
+            }, 15000);
+        }
     }
 
-    animateOpen();
+    requestAnimationFrame(animateOpen);
 
-    // کلیک روی پرتال → رفتن به صفحه
+    // click on video -> move camera and change page
     video.onclick = () => {
-        moveCameraToPortalAndChangePage();
         clearTimeout(portalTimeoutId);
+        moveCameraToPortalAndChangePage(worldPos);
     };
-
-    // اگر ۱۵ ثانیه کلیک نشد → بسته شود
-    portalTimeoutId = setTimeout(() => {
-        closePortalVideo();
-    }, 15000);
 }
 
+/* -----------------------
+   Close portal video (scale down)
+   ----------------------- */
 function closePortalVideo() {
     const video = document.getElementById("portal-video");
     if (!video) return;
 
-    let scale = 1;
-    let opacity = 1;
+    let startScale = parseFloat(getComputedStyle(video).transform.split(',')[0].replace('matrix(', '')) || 1;
+    // fallback if parsing fails
+    if (!startScale || startScale <= 0) startScale = 1.25;
 
-    function animateClose() {
-        scale -= 0.08;
-        opacity -= 0.08;
+    const duration = 420;
+    const startTime = performance.now();
 
-        if (scale <= 0) {
-            scale = 0;
-            opacity = 0;
-            video.pause();
-            portalOpen = false;
-            video.style.transform = `translate(-50%, -50%) scale(0)`;
-            video.style.opacity = `0`;
-            return;
-        } else {
-            requestAnimationFrame(animateClose);
-        }
+    function animateClose(time) {
+        const t = Math.min((time - startTime) / duration, 1);
+        const eased = easeInCubic(1 - t);
+
+        const scale = startScale * eased;
+        const opacity = eased;
 
         video.style.transform = `translate(-50%, -50%) scale(${scale})`;
         video.style.opacity = `${opacity}`;
+
+        if (t < 1) {
+            requestAnimationFrame(animateClose);
+        } else {
+            video.pause();
+            video.style.display = 'none';
+            portalOpen = false;
+        }
     }
 
-    animateClose();
+    requestAnimationFrame(animateClose);
 }
 
-function moveCameraToPortalAndChangePage() {
-    const target = new THREE.Vector3(0, 0, 0); // وسط صحنه / پرتال
-    const startPos = camera.position.clone();
-    const endPos = new THREE.Vector3(0, 0, 20);
+/* -----------------------
+   Camera move: from current camera position to a point near the portal worldPos
+   with FOV stretch effect
+   ----------------------- */
+function moveCameraToPortalAndChangePage(portalWorldPos) {
+    // portalWorldPos is the world anchor where the portal video opened
+    const startPos = camera.position.clone();   // current camera position
+    // compute an end position slightly behind the portalWorldPos along camera->portal direction
+    const dir = portalWorldPos.clone().sub(startPos).normalize();
+    const endPos = portalWorldPos.clone().sub(dir.multiplyScalar(6)); // stop 6 units before portal center
 
-    const duration = 800;
+    const startFov = camera.fov;
+    const endFov = Math.min(110, startFov + 40); // stretch effect
+
+    const duration = 900;
     const startTime = performance.now();
 
     function animateCam(time) {
         const t = Math.min((time - startTime) / duration, 1);
+        const eased = easeInOutCubic(t);
 
-        camera.position.lerpVectors(startPos, endPos, t);
-        camera.lookAt(target);
+        camera.position.lerpVectors(startPos, endPos, eased);
+        camera.fov = startFov + (endFov - startFov) * (0.6 * eased); // partial FOV change for effect
+        camera.updateProjectionMatrix();
+        camera.lookAt(portalWorldPos);
 
         if (t < 1) {
             requestAnimationFrame(animateCam);
         } else {
-            // بعد از رسیدن به پرتال → تغییر صفحه
-            changePage(pages[selectedPageIndex]);
-            closePortalVideo();
+            // restore FOV smoothly
+            const restoreStart = performance.now();
+            const restoreDur = 300;
+            function restore(time2) {
+                const tt = Math.min((time2 - restoreStart) / restoreDur, 1);
+                camera.fov = endFov + (startFov - endFov) * easeOutCubic(tt);
+                camera.updateProjectionMatrix();
+                if (tt < 1) requestAnimationFrame(restore);
+                else {
+                    // finally change page and close portal
+                    changePage(pages[selectedPageIndex]);
+                    closePortalVideo();
+                }
+            }
+            requestAnimationFrame(restore);
         }
     }
 
     requestAnimationFrame(animateCam);
 }
 
+/* -----------------------
+   Helpers
+   ----------------------- */
+function worldToScreen(pos, camera) {
+    const vector = pos.clone();
+    vector.project(camera);
 
-function setupDialDomInteraction() {
-    const dialDom = document.getElementById("portal-dial-dom");
-
-    let lastTapTime = 0;
-
-    dialDom.addEventListener("pointerdown", () => {
-        const now = Date.now();
-
-        // دابل‌کلیک / دابل‌تاپ
-        if (now - lastTapTime < 300) {
-            handlePortalShot();
-        } else {
-            // کلیک معمولی → تغییر متن
-            selectedPageIndex = (selectedPageIndex + 1) % pages.length;
-            updatePortalText(pages[selectedPageIndex]);
-        }
-
-        lastTapTime = now;
-    });
+    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
+    return { x, y };
 }
 
+function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+}
+function easeInCubic(t) {
+    return t * t * t;
+}
+function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
 
+/* -----------------------
+   Portal text & dial DOM positioning
+   ----------------------- */
 function updatePortalText(text) {
     const div = document.getElementById("portal-text");
     div.innerText = text.toUpperCase();
@@ -354,13 +478,14 @@ function updatePortalTextPosition() {
     let x = (vector.x * 0.5 + 0.5) * window.innerWidth;
     let y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
 
-    // تنظیمات دقیق برای قرارگیری روی بخش قرمز
-    x -= -30;   // کمی چپ‌تر
-    y -= 45;   // کمی بالاتر
+    // fine tuning: move a bit right and down so it sits nicely
+    x += 30;   // right
+    y += -50;   // down
 
     const div = document.getElementById("portal-text");
     div.style.left = `${x}px`;
     div.style.top = `${y}px`;
+    // slight rotation already in CSS
 }
 
 function updateDialDomPosition() {
@@ -375,12 +500,15 @@ function updateDialDomPosition() {
     let y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
 
     const dialDom = document.getElementById("portal-dial-dom");
-    dialDom.style.left = `${x + 30}px`;
-    dialDom.style.top = `${y - 10}px`;
+
+    // offset so the DOM circle sits visually over the model button
+    dialDom.style.left = `${x + 15}px`;
+    dialDom.style.top = `${y - 20}px`;
 }
 
-// ---------- صفحات دیگر ----------
-
+/* -----------------------
+   Placeholder pages
+   ----------------------- */
 function setNotebookScene() {
     const geometry = new THREE.BoxGeometry(1.5, 1, 0.1);
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true });
